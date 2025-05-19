@@ -1,9 +1,3 @@
-'''
-Notes: 1. Add features in find_objects
-       2. Add function for finding the fwhm
-'''
-
-
 import matplotlib.pyplot as plt 
 import numpy as np 
 import time
@@ -13,8 +7,6 @@ from astropy.io import fits
 
 from photutils.detection import DAOStarFinder
 from photutils.aperture import CircularAperture
-
-from XRBID.WriteScript import WriteReg
 
 def find_objects(data, fwhm, threshold=None, sigma=5, conversion=0.031, radius=5, cmap='gray_r', vmin=0, vmax=0.3, std_multiple=5, aperture_color='#0547f9', plot=True):
     """
@@ -91,20 +83,24 @@ def find_objects(data, fwhm, threshold=None, sigma=5, conversion=0.031, radius=5
 
     return objects
 
-    # WriteReg(sources=)
+# Create Apertures
+def create_apertures(positions, rad_list=(1, 31)):
+    ap_rads = [i for i in range(1,31)]
+    apertures_full = [CircularAperture(positions, r=r) for r in ap_rads]
+    apertures_source = CircularAperture(positions, r=3) # 3px aperture photometry used for sources by default
+    apertures_extended = CircularAperture(positions, r=10) # aperture photometry for clusters (default is 10 pixels)
+    return apertures_full, apertures_source, apertures_extended
 
-'''
-1. DAOFind to identify stars
-2. Generate background subtracted hdu image
-3. Run Photometry using the background-subtracted image.  
-        - full aperture photometry between 1-30 pixels radii
-        - aperture photometry within 3 pixels 
-        - aperture photometry within the extended radius for clusters 
-4. Aperture correction on full aperture photometry. Apply correction
-    to both the minimum aperture photometry and the extended aperture photometry 
-'''
-
-
-
+def perform_photometry(data_sub, apertures, type, savefile=True):
+    '''
+    A helper function to calculate the aperture photometry.
+    type : full/extended/sources
+    '''
+    starttime = time.time()
+    photometry = aperture_photometry(data_sub, apertures, method='center')
+    endtime = time.time()
+    photometry.write("photometry_"+gal+"_"+filter.lower()+"_"+instrument.lower()+"_"+type+suffix+".ecsv", overwrite=True)
+    print("photometry_"+gal+"_"+filter.lower()+"_"+instrument.lower()+"_"+type+suffix+".ecsv", "saved")
+    return photometry
 
 
