@@ -1,3 +1,9 @@
+'''
+Notes: 1. Add features in find_objects
+       2. Add function for finding the fwhm
+'''
+
+
 import matplotlib.pyplot as plt 
 import numpy as np 
 import time
@@ -8,13 +14,16 @@ from astropy.io import fits
 from photutils.detection import DAOStarFinder
 from photutils.aperture import CircularAperture
 
+from XRBID.WriteScript import WriteReg
+
 def find_objects(data, fwhm, threshold=None, sigma=5, conversion=0.031, radius=5, cmap='gray_r', vmin=0, vmax=0.3, std_multiple=5, aperture_color='#0547f9', plot=True):
     """
     Find objects in an image using the DAOFind algorithm and then plot apertures around the objects. 
 
     Note: this is under active construction
     Feature to add : 1. conversion rate on the basis of the filter used. 
-                     2. I want the code to accept both data + hdu files 
+                     2. I want the code to accept both data + hdu files
+                     3. add conversion rate for different filters 
 
     
     PARAMETERS
@@ -80,51 +89,22 @@ def find_objects(data, fwhm, threshold=None, sigma=5, conversion=0.031, radius=5
     endtime = time.time()
     print("Time for the run:", (endtime-starttime)/60., "minutes")
 
-    return positions
+    return objects
+
+    # WriteReg(sources=)
+
+'''
+1. DAOFind to identify stars
+2. Generate background subtracted hdu image
+3. Run Photometry using the background-subtracted image.  
+        - full aperture photometry between 1-30 pixels radii
+        - aperture photometry within 3 pixels 
+        - aperture photometry within the extended radius for clusters 
+4. Aperture correction on full aperture photometry. Apply correction
+    to both the minimum aperture photometry and the extended aperture photometry 
+'''
 
 
-def find_objects_in_subset(data, fwhm, threshold=None, sigma=5, conversion=0.031, radius=5, cmap='gray_r', vmin=0, vmax=0.3, std_multiple=5, aperture_color='limegreen', plot=True):
-    mean, median, std = sigma_clipped_stats(data, sigma=sigma)
-    if threshold:
-        daofind = DAOStarFinder(fwhm=fwhm/conversion, threshold=threshold)
-        objects = daofind(data)
-        
-    else:
-        daofind = DAOStarFinder(fwhm=fwhm/conversion, threshold=std_multiple*std)
-        objects = daofind(data)
 
-    print("Found", len(objects), "objects.")
-    positions = np.transpose((objects["xcentroid"], objects["ycentroid"]))
 
-    # Create apertures around sources
-    if plot:
-        apertures = CircularAperture(positions, r=radius)
-        plt.imshow(data, cmap=cmap, vmin=vmin, vmax=vmax, origin='lower')
-        apertures.plot(color=aperture_color)
-        plt.show()
-    
-    return positions
 
-# Test 1
-# jwstdir = "/Users/undergradstudent/Research/XRB-Analysis/Galaxies/M66/JWST/"
-# f200w = jwstdir+"hlsp_phangs-jwst_jwst_nircam_ngc3627_f200w_v1p1_img.fits"
-# # data = fits.getdata(f200w)
-# fwhm = 0.17
-# objects = find_objects(f200w, fwhm=fwhm, sigma=5, vmax=10, std_multiple=3)
-
-# # jwstdir = "/Users/undergradstudent/Research/XRB-Analysis/Galaxies/M66/JWST/"
-# # f200w = jwstdir+"hlsp_phangs-jwst_jwst_nircam_ngc3627_f200w_v1p1_img.fits"
-# # data = fits.getdata(f200w)
-# # data = data[2000:4000, 2000:4000]
-# # fwhm = 0.10*2
-# # objects = find_objects_in_subset(data, fwhm=fwhm, sigma=5, vmax=10, std_multiple=1)
-
-# for i in range(0, 10):
-#     print(i, end=' ')
-
-# x = np.array([1, 2, 3, 4, 5])
-
-# y = np.array([10, 11, 12, 13, 14])
-
-# plt.plot(x, y)
-# plt.show()
