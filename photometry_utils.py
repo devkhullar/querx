@@ -103,4 +103,16 @@ def perform_photometry(data_sub, apertures, type, savefile=True):
     print("photometry_"+gal+"_"+filter.lower()+"_"+instrument.lower()+"_"+type+suffix+".ecsv", "saved")
     return photometry
 
+def instrument_info(file_path):
+    '''
+    A helper function that provides the necessary information on the instrument being used.
+    '''
+    with fits.open(file_path) as hdul:
+        print("Instrument: "+ hdul[0].header['INSTRUME'],
+              "\nDetector: " + hdul[0].header['DETECTOR'],
+              "\nModule: " + hdul[0].header['MODULE'],
+              "\nChannel: " + hdul[0].header['CHANNEL'],
+              "\nFilter: " + hdul[0].header['FILTER'],
+              "\nPupil: " + hdul[0].header['PUPIL'])
+
 
