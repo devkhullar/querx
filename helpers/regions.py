@@ -211,7 +211,7 @@ def WriteReg(sources, outfile, coordsys=False, coordheads=False, reg_type='circl
     if reg_type == 'ruler':
         f_reg = [f"{reg}{x_coords[i] + addshift[0]}, {y_coords[i] + addshift[1]}, {x1_coords[i] + addshift[0]}, {y1_coords[i] + addshift[1]}{r}" for i, r in enumerate(reg_props)]
     elif reg_type == 'vector':
-        f_reg = [f"{reg}{x_coords[i] + addshift[0]}, {y_coords[i] + addshift[1]}, {length[i]}\", {theta[i]}{r}" for i, r in enumerate(reg_props)]
+        f_reg = [f"{reg}{x_coords[i] + addshift[0]}, {y_coords[i] + addshift[1]}, {length[i]}d, {theta[i]}{r}" for i, r in enumerate(reg_props)]
     else:
         f_reg = [f"{reg}{x_coords[i] + addshift[0]}, {y_coords[i] + addshift[1]}{r}" for i, r in enumerate(reg_props)]
         # f_reg = [reg+str(x_coords[i]+addshift[0])+", "+str(y_coords[i]+addshift[1])+r for i,r in enumerate(reg_props)]
@@ -228,7 +228,5 @@ def WriteReg(sources, outfile, coordsys=False, coordheads=False, reg_type='circl
         with open(savecoords, "w") as f: 
             np.savetxt(f, np.column_stack([x_coords, y_coords]))
         print(savecoords, "saved!")
-
-# if __name__ == "__main__":
 
     
