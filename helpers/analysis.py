@@ -301,11 +301,11 @@ def calculate_distances(
         df=df,
         regions=regions,
         catalogs=catalogs,
-        sourceid='CSC ID',
+        sourceid=sourceid,
         search_radius=search_radius,
-        coordsys='fk5',
-        coordheads=['RA', 'Dec'],
-        outfile='XRB_to_cluster.txt',
+        coordsys=coordsys,
+        coordheads=coordheads,
+        outfile=outfile,
     )
 
     crossref_df = get_coords(crossref_df, regions, catalogs)
@@ -315,24 +315,115 @@ def calculate_distances(
 
     return crossref_df
 
-def euclidean_distance(
-        hdu,
-        df,
-        catalogs
+def euclidean_distance(filename,
+                       df,
+                       catalogs, 
+                       frame='fk5', 
+                       unit_of_coords='deg', 
+                       unit_of_dist='pix',
+                       instrument=None,
+                       pixtoarcs=None,
+                       shorten_df=False,
+                       additional_cols=[]
 ):
-    '''Calculates the euclidean distance between XRBs and clusters.'''
+    '''Calculate euclidean distance between two sets of objects
+    
+    Parameters
+    ----------
+    filename : str
+        The path of the base image to be used for distance calculation.
+    df : pd.DataFrame
+        Dataframe containing the coordinates of the objects to compare
+    catalogs : list
+        list containing the names of the objects being compared to.
+        Default is 'fk5'
+    frame : str
+        The reference coordinate frame of the object. Will be used to 
+        convert coordinates to pixels. Default is 'fk5.
+    unit_of_coords : str
+        The units of the coordinates that are being extracted from the dataframe.
+        Default is 'deg'
+    unit_of_dist : str
+        The units to use in the distances between the objects. Default is 'pix'.
+    instrument : str
+        The instrument of the base image. Required to convert coordinates to coordinates
+        other than pixels. Default is `None`. Other options include 'wfc3', 'acs', 
+        'nircamL' for long wavelength with NIRCam and 'nircamS' for short wavelength
+        with NIRCam.
+    pixtoarcs : float
+        The pixel to arcsecond conversion to use for changing coordinates to coordinates other
+        than pixels. Default is `None`. This parameter is not required to pass usually as the
+        `instrument` parameter uses the `pixtoarcs` conversion based upon the instrument being used.
+    shorten_df : bool
+        If `True`, provides a smaller dataframe containing only the CSC ID, coordinates (image and others)
+        as well as the distances. Default is False
+    additional_cols : list of strings
+        Additional columns to include in the shortened dataframe
+
+    Returns
+    -------
+    df : pd.Dataframe
+        Dataframe containing the distances between the objects
+    '''
+    df = df.copy()
+    hdu = fits.open(filename)
     try: wcs = WCS(hdu['SCI'].header)
     except: wcs = WCS(hdu['PRIMARY'].header)
 
-    xrb_ra = df['RA'].values
-    xrb_dec = df['Dec'].values
+    # If the dataframe contains the x and y coordinates
+    # The code below has been commented because I suspect there is something going
+    # wrong with the conversion between the coordinates. This is likely due to how 
+    # data is stored within pandas dataframes and numpy arrays. I am still working on
+    # how to combat that. Until then, convert the dataframes RA and Dec
+    # if 'X' and 'Y' in df.columns:
+    #     x, y = df['X'].values, df['Y'].values
+    # else: 
+    ra, dec = df['RA'].values, df['Dec'].values
+    x, y = SkyCoord(ra, dec, frame=frame, unit=unit_of_coords).to_pixel(wcs)
 
-    # transforming the RA and Dec in SkyCoord coordinates
-    # with unit degress and fk5 frame
-    xrb_coords_fk5 = SkyCoord(xrb_ra, xrb_dec, frame='fk5', unit='deg')
+    arr = np.array([x, y]).T
 
-    xrb_coords_pix = xrb_coords_fk5.to_pixel(wcs)
+    cmpr_cols = []
 
-    # Perform the distance calculations on pixel coords
-    # for catalog in catalogs:
+    # Extract the coordinates that are going to be used to calculate 
+    # the distance to the first object
+    cmpr_cols = []
+    for catalog in catalogs:
+        if (f'{catalog} X' and f'{catalog} Y') in df.columns:
+            x1, y1 = df[f'{catalog} X'].values, df[f'{catalog} Y'].values
+        else:
+            ra1, dec1 = df[f'{catalog} RA'].values, df[f'{catalog} Dec'].values
+            x1, y1 = SkyCoord(ra1, dec1, frame=frame, unit=unit_of_coords).to_pixel(wcs)
 
+        # the comparison array contains the coordinates which will calculate
+        # the distance of the first object to these objects.
+        cmpr_arr = np.array([x1, y1]).T
+
+        dist = np.array([np.linalg.norm(arr[i] - cmpr_arr[i]) for i in range(len(df))])
+        # Incorporate unit conversion to also include arcsecs
+        if unit_of_dist == 'arcsec':
+            if instrument:
+                if instrument.lower() == 'acs':
+                    pixtoarcs = 0.05
+                elif instrument.lower() == 'wfc3':
+                    pixtoarcs = 0.03962
+                    dist = dist * pixtoarcs
+                elif instrument.lower() == 'nircaml': # if Nircam long wavelength
+                    pixtoarcs = 0.063
+                    dist = dist * pixtoarcs
+                elif instrument.lower() == 'nircams': # if Nircam short wavelength
+                    pixtoarcs = 0.031
+                    dist = dist * pixtoarcs
+            elif pixtoarcs:
+                    if not pixtoarcs: input("Please input pixtoarcs") 
+                    dist = dist * pixtoarcs
+
+        df[f'Distance to {catalog} ({unit_of_dist})'] = dist
+
+        cmpr_cols.extend([f'{catalog} RA', f'{catalog} Dec', f'Distance to {catalog} ({unit_of_dist})'])
+        print(cmpr_cols)
+    if shorten_df: 
+        cols = ['CSC ID', 'X', 'Y', 'RA', 'Dec'] + cmpr_cols + additional_cols
+        df = df[cols].reset_index(drop=True)
+
+    return df
