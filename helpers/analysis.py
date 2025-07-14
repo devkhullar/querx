@@ -3,9 +3,10 @@ import pandas as pd
 from XRBID.WriteScript import WriteReg
 from XRBID.DataFrameMod import Find
 from XRBID.CMDs import FitSED
-from XRBID.Sources import GetCoords, GetIDs
-from numpy import sqrt
-from XRBID.DataFrameMod import BuildFrame
+from XRBID.Sources import Crossref, GetCoords, GetIDs
+from astropy.io import fits
+from astropy.wcs import WCS
+from astropy.coordinates import SkyCoord
 
 chandra_jwst_dir = "/Users/undergradstudent/Research/XRB-Analysis/Galaxies/M66/Chandra-JWST/"
 input_model = '/Users/undergradstudent/Research/XRB-Analysis/jwst-models/isochrone-query-step-0_009.dat'
@@ -214,254 +215,124 @@ def compare_dfs(df1, df2,
 
     return temp
 
-def Crossref(df=None, regions=False, catalogs=False, coords=False, sourceid="ID", search_radius=3, coordsys="img", coordheads=False, verbose=True, shorten_df=False, outfile="crossref_results.txt"): 
+# class XrayBinary:
+#     def __init__(self, df):
+#         self.df = df.copy()
+#         self.RA = df['RA'].values
+#         self.Dec = df['Dec'].values
+#         if 'CSC ID' in self.df.columns: 
+#             self.cscid = self.df['CSC ID'].values
+#         if 'X' in self.df.columns: self.x = self.df['X'].values
+#         if 'Y' in self.df.columns: self.y = self.df['Y'].values  
 
-    """
-
-    UPDATE NEEDED: Keep the other columns in the dataframe.
-
-    From input DataFrame and/or region files (in image coordinate format), finds overlaps within a given 
-    search radius of the DataFrame sources and prints all ID names to a file as a DataFrame. 
-    If the coordinates are given as ['RA', 'Dec'] instead of ['X','Y'], must change coordsys from "img" to "fk5" 
-    and convert search_radius from pixels to degrees. Can feed in the name of the catalogs used to output 
-    as DataFrame headers. Otherwise, the region name will be used.
-
-    NOTE: There is an error in this where if the first region file doesn't have a counterpart in the first 
-    entry of the overlap file, the first entry may be split into multiple entries. Check file.
-
-    PARAMETERS
-    -----------
-    df        [pd.DataFrame]    : DataFrame containing the coordinates of the sources for which the counterparts 
-                      will be found in the given region files or catalogs. 
-    regions     [list]        : List of filenames for regions to cross-reference sources from. This should be
-                      in the same coordinate system as the units in df. 
-    catalogs    [list]        : Name of the catalogs associated with the input region files. This will be used to
-                      define the ID header for sources in each region file. If none is given, then the  
-                      region file name is used as the respective source ID header.
-    coords         [list]        : List of coordinates to cross-reference; can be given instead of regions. 
-    sourceid    [str] ('ID')    : Name of header containing the ID of each source in df. 
-    search_radius    [list] (3)    : Search radius (in appropriate units for the coordinate system) around each source in df. 
-                      Can be read in as a single value or a list of values (for unique radii).
-    coordsys    [str] ('img')    : Coordinate system of the region files. NOTE: there may be issues reading in 'fk5'. 
-                         'img' (pixel) coordinates are recommended. 
-    coordheads    [list]        : Name of header under which coordinates are stored. Will assume ['X','Y'] or ['x','y'] if coordsys='img'
-                      or ['RA','Dec'] if coordsys is 'fk5'. 
-    verbose     [bool] (True)    : Set to False to avoid string outputs.
-    shorten_df    [bool] (False)    : If True, shortens the output DataFrame to only include the original ID of each source in df, 
-                      the coordinates, and the counterpart IDs of each of the other catalogs. Otherwise, will maintain
-                      the original headers of the input DataFrame df.
-    outfile        [str]        : Name of output file to save matches to. By default, saves to a file called 'crossref_results.txt'
-
-    RETURNS
-    ---------
-    Matches        [pd.DataFrame]    : DataFrame containing the original ID of each source, its coordinates, and the ID of all 
-                      corresponding matches in each of the input region files or coordinates. 
-    
-    """
-
-    sources = df.copy()
-
-    xlist = []
-    ylist = []
-    idlist = []
-
-    # headerlist keeps track of the headers in the input DataFrame
-    # if shorten_df = False, will use this to reapply addition headers to the Matches DataFrame
-    dfheaderlist = sources.columns.tolist()
-    
-    # Removing headers that will be duplicated later
-    dfheaderlist.remove(sourceid)
-
-    if not isinstance(search_radius, list): search_radius = [search_radius]*len(sources)
-
-    masterlist = [] # list of all matched sources
-
-    if regions:
-        if not isinstance(regions, list): regions = [regions]
-        for i in regions: 
-            idlist.append(GetIDs(i, verbose=False))
-            xtemp, ytemp = GetCoords(i, verbose=False)
-            xlist.append(xtemp)
-            ylist.append(ytemp)
-    elif coords: 
-        # if given coords, they should be read in as a list of [xcoords, ycoords]. 
-        xlist = coords[0]
-        ylist = coords[1]
-        if not isinstance(xlist, list): 
-            xlist = [xlist]
-            ylist = [ylist]
-
-    blockend = 0 # keeps track of the index of the current 'block' of counterparts associated with a single base source 
-
-    # Figuring out the coordinate headers if not given
-    if not isinstance(coordheads, list): 
-        coordheads = [False, False]
-        if coordsys == "fk5": 
-            if "RA" in dfheaderlist: coordheads[0] = "RA" 
-            elif "ra" in dfheaderlist: coordheads[0] = "ra" 
-            if "Dec" in dfheaderlist: coordheads[1] = "Dec" 
-            elif "dec" in dfheaderlist: coordheads[1] = "dec"
-        elif coordsys == "img":
-            if "X" in dfheaderlist: coordheads[0] = "X"
-            elif "x" in dfheaderlist: coordheads[0] = "x"
-            if "Y" in dfheaderlist: coordheads[1] = "Y" 
-            elif "y" in dfheaderlist: coordheads[1] = "y" 
-        if not coordheads[0] and not coordheads[1]: # if coordinates not found, prompt user to input 
-            coordheads = input("Coordinate headers not found. Please input headers separated by comma (xhead,yhead): ")
-            coordheads = [i.strip() for i in coordheads.split(",")]
-    
-    # Removes headers from list, to avoid duplications later
-    dfheaderlist.remove(coordheads[0])
-    dfheaderlist.remove(coordheads[1])
-
-    if verbose: print("Finding cross-references between sources. This will take a few minutes. Please wait.. ")
-    for i in range(len(sources)): # for each source in the DataFrame
-        # Properties of each source
-        # Pulling the coordinates of each source
-        xtemp = sources[coordheads[0]][i]
-        ytemp = sources[coordheads[1]][i]
-
-        tempid = sources[sourceid][i]
-        tempn = 0  
-        # tempn keeps track of the number of overlap sources identified in the current list for the current base source (used as index)
-
-        # Search area around each source
-        tempxmax = xtemp+search_radius[i]
-        tempxmin = xtemp-search_radius[i]
-        tempymax = ytemp+search_radius[i]
-        tempymin = ytemp-search_radius[i]
-
-        # Adding each new source to the list, starting as a list of "None" values
-        # If no counterparts are found, the source will appear with "None" for counterparts.
-        tempids = [None]*(len(idlist) + 1)
-        tempids[0] = tempid             # adding original source ID to the front
-        tempids = [xtemp, ytemp] + tempids     # adding original coordinates to the front
-        if not shorten_df: tempids = tempids + [sources[head][i] for head in dfheaderlist] # adding additional header values at end, if requested
-        masterlist.append(tempids)        # saving to the full source list
-
-        # Searching each list of sources from each region file to identify overlaps
-        for j in range(len(idlist)): # Number of lists (region files) to search through (e.g. for each catalog, search...)
-            for k in range(len(xlist[j])): # Number of sources to search through for the current list/region file (e.g. for each source in a specific catalog...)
-                # When overlap is found, see if masterlist has room to add it. 
-                # If not, add a new row to make room.
-                if tempxmax > xlist[j][k] > tempxmin and tempymax > ylist[j][k] > tempymin and \
-                sqrt((xlist[j][k]-xtemp)**2 + (ylist[j][k]-ytemp)**2) <= search_radius[i]: # If the catalog source falls within the range of the base source
-                    try: 
-                        # With blockend showing how many total items were found prior to the search on this source, 
-                        # and tempn showing how many counterparts were identified for the current source, 
-                        # blockend+tempn should identify the index of the current source
-                        # The following will cycle through all indices from blockend to blockend+tempn 
-                        # to see where the last open space is
-                        for n in range(tempn+1):
-                            if masterlist[blockend+n][j+3] == None: 
-                                masterlist[blockend+n][j+3] = idlist[j][k]
-                                break; # After the last open space, break the chain.
-                            else: pass;
-                    except: 
-                        # Exception will be raised once we reach the end of the current list without finding a free space. 
-                        # Add a new line, if that's the case.
-                        tempids = [None]*(len(idlist) + 1) # keeps track of the ids associated with the identified source
-                        tempids[0] = tempid    # adding current source id to front of list
-                        tempids = [xtemp, ytemp] + tempids    # adding current coordinates to list
-                        if not shorten_df: 
-                            tempids = tempids + [sources[head][i] for head in dfheaderlist] # adding additional header values at end
-                        tempids[j+3] = idlist[j][k] # Add the source to the list of matches
-                        masterlist.append(tempids)
-
-                    tempn = tempn + 1 # adds a count to the identified sources for this file.
-
-        blockend = len(masterlist) # the index of the end of the previous "block" of sources already detected.
-
-    if verbose: print("DONE WITH CLEANING. CREATING DATAFRAME...")
-
-    # If catalogs not given, use the name of the region files as the headers of the DataFrame
-    if not catalogs:
-        catalogs = []
-        try: 
-            for r in regions: catalogs.append(r.split(".reg")[0]) 
-        except: 
-            for i in len(range(xlist)): catalogs.append("ID "+str(i))
-    else: catalogs = [cat+" ID" for cat in catalogs]
-
-    # Adding catalogs to the headers to be read into the DataFrame
-    headlist = [coordheads[0], coordheads[1], sourceid]
-    for i in catalogs: headlist.append(i)    # adding the name of the catalogs to the header list
-    if not shorten_df: headlist = headlist + dfheaderlist    # if requesting, readding other original headers to end of list
-    vallist = []
-    # Converting the masterlist into an array to be read in as DataFrame values
-    temp_array = np.array(masterlist).T
-    for i in range(len(temp_array)): vallist.append(temp_array[i].tolist())
-
-    Matches = BuildFrame(headers=headlist, values=vallist)
-    Matches.to_csv(outfile)
-
-    return Matches
-
-class XrayBinary:
-    def __init__(self, df):
-        self.df = df.copy()
-        self.RA = df['RA'].values
-        self.Dec = df['Dec'].values
-        if 'CSC ID' in self.df.columns: 
-            self.cscid = self.df['CSC ID'].values
-        if 'X' in self.df.columns: self.x = self.df['X'].values
-        if 'Y' in self.df.columns: self.y = self.df['Y'].values  
-
-    def crossref(self, clusters, catalogs, search_radius=3, sourceid='CSC ID',
-                 outfile='xrb_to_cluster_crossref.txt'):
-        '''A method to crossreference between the X-ray Binaries and clusters. 
+#     def crossref(self, clusters, catalogs, search_radius=3, sourceid='CSC ID',
+#                  outfile='xrb_to_cluster_crossref.txt'):
+#         '''A method to crossreference between the X-ray Binaries and clusters. 
         
-        This method will first `Crossref` between the X-ray Binaries and clusters
-        to study the ejection of X-ray Binaries from star clusters and add the RA and Dec
-        coordinates of those crossreferences to the current dataframe. 
+#         This method will first `Crossref` between the X-ray Binaries and clusters
+#         to study the ejection of X-ray Binaries from star clusters and add the RA and Dec
+#         coordinates of those crossreferences to the current dataframe. 
 
-        Parameters
-        ----------
-        clusters : ds9 regions files, list
-            DS9 regions files of the clusters to crossreference between
-            the X-ray Binaries and the clusters. The coordinates must in fk5.
-        catalogs : list 
-            Name of the catalogs associated with the region files.
-        Returns
-        -------
-        crossref_df : pd.DataFrame
-            Crossreferenced dataframe containing the IDs and coordinates of clusters.
-        '''
+#         Parameters
+#         ----------
+#         clusters : ds9 regions files, list
+#             DS9 regions files of the clusters to crossreference between
+#             the X-ray Binaries and the clusters. The coordinates must in fk5.
+#         catalogs : list 
+#             Name of the catalogs associated with the region files.
+#         Returns
+#         -------
+#         crossref_df : pd.DataFrame
+#             Crossreferenced dataframe containing the IDs and coordinates of clusters.
+#         '''
 
-        # Make sure that the cluster regions and the list of their names are of the same size
-        # assert(len(clusters) == len(catalogs))
+#         # Make sure that the cluster regions and the list of their names are of the same size
+#         # assert(len(clusters) == len(catalogs))
 
-        crossref_df = Crossref(
-            df=self.df,
-            regions=clusters,
-            catalogs=catalogs,
-            sourceid=sourceid,
-            # append_coords=True,
-            search_radius=search_radius,
-            coordsys='fk5',
-            coordheads=['RA', 'Dec'],
-            outfile=outfile
+#         df = Crossref(
+#             df=self.df,
+#             regions=clusters,
+#             catalogs=catalogs,
+#             sourceid=sourceid,
+#             search_radius=search_radius,
+#             coordsys='fk5',
+#             coordheads=['RA', 'Dec'],
+#             outfile=outfile
+#         )
+
+#         df = get_coords(df, clusters, catalogs)
+#         # self.df = crossref_df
+#         # return crossref_df
+
+def get_coords(df, regions, catalogs):
+    '''A helper function to extract the coordinates and IDs of clusters
+    and merge it with the `Crossref`'d dataframe.'''
+    for region, catalog in zip(regions, catalogs):
+        temp = pd.DataFrame()
+        ids = GetIDs(region, verbose=False)
+        ra, dec = GetCoords(region, verbose=False)
+        temp[f'{catalog} RA'] = ra
+        temp[f'{catalog} Dec'] = dec
+        temp[f'{catalog} ID'] = ids
+        temp[f'{catalog} ID'] = temp[f'{catalog} ID'].astype(float)
+
+        df = pd.merge(
+            df,
+            temp,
+            how='left',
+            on=f'{catalog} ID'
         )
 
-        # __get_coords(crosxsref_df)
+    return df
 
-        # for cluster, catalog in zip(clusters, catalogs):
-        #     ra, dec = GetCoords(infile=cluster)
-        #     crossref_df[f'{catalog} RA'], crossref_df[f'{catalog} Dec'] = ra, dec
+def calculate_distances(
+        df,
+        regions,
+        catalogs,
+        sourceid='CSC ID',
+        search_radius=0.005,
+        coordsys='fk5',
+        coordheads=['RA', 'Dec'],
+        outfile='XRB_to_cluster.txt',
+        calculate_velocity=True,
+):
+    '''Calculate the distance between XRBs and clusters.'''
+    crossref_df = Crossref(
+        df=df,
+        regions=regions,
+        catalogs=catalogs,
+        sourceid='CSC ID',
+        search_radius=search_radius,
+        coordsys='fk5',
+        coordheads=['RA', 'Dec'],
+        outfile='XRB_to_cluster.txt',
+    )
 
-        return crossref_df
+    crossref_df = get_coords(crossref_df, regions, catalogs)
 
-        # def get_coords(self, self.df, regions, catalogs):
+    if calculate_velocity:
+        pass
 
-        #     for catalog in catalogs:
-        #         self.df[f'{catalog} RA'] = ''
-        #         self.df[f'{catalog} Dec'] = ''
+    return crossref_df
 
-        #     for region in regions:
-        #         ra, dec = GetCoords(region)
-        #         for catalog in catalogs:
-        #             self.df[f'{catalog} RA'] = ''
-        #             self.df[f'{catalog} Dec'] = ''
+def euclidean_distance(
+        hdu,
+        df,
+        catalogs
+):
+    '''Calculates the euclidean distance between XRBs and clusters.'''
+    try: wcs = WCS(hdu['SCI'].header)
+    except: wcs = WCS(hdu['PRIMARY'].header)
 
-        #     for catalog in catalogs:
-        #         self.df[]
+    xrb_ra = df['RA'].values
+    xrb_dec = df['Dec'].values
+
+    # transforming the RA and Dec in SkyCoord coordinates
+    # with unit degress and fk5 frame
+    xrb_coords_fk5 = SkyCoord(xrb_ra, xrb_dec, frame='fk5', unit='deg')
+
+    xrb_coords_pix = xrb_coords_fk5.to_pixel(wcs)
+
+    # Perform the distance calculations on pixel coords
+    # for catalog in catalogs:
+
