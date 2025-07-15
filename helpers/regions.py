@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+from XRBID.Sources import GetCoords
+import re
 
 def make_circular_regions(radius):
     reg = "circle("
