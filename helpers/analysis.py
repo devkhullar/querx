@@ -505,7 +505,7 @@ class XrayBinary:
             fontsize=fontsize
         )
 
-    def make_kde_plot(self, x, bw_adjust,
+    def plot_kde(self, x, bw_adjust,
                       label='Distance to the nearest cluster',
                       fill=True, alpha=0.5, **kwargs
                       ):
@@ -513,4 +513,13 @@ class XrayBinary:
                     fill=True, alpha=0.5,
                     **kwargs)
         plt.xlabel(label)
+        plt.show()
+
+    def plot_hist(self, x, bins=None, 
+                  xlabel='Distance to the nearest cluster (km)',
+                  ylabel='Density',
+                   **kwargs):
+        plt.hist(x=x, bins=bins, **kwargs)
+        plt.xlabel(xlabel)
+        plt.ylabel(ylabel)
         plt.show()
