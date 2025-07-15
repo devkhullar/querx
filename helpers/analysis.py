@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 from XRBID.DataFrameMod import Find
 from XRBID.CMDs import FitSED
 from XRBID.Sources import Crossref, GetCoords, GetIDs
@@ -37,8 +39,8 @@ columns={
 }
 
 instrument_pixtoarcs = {
-    'acs' : 0.05,
-    'wfc3' : 0.03962,
+    'acs'     : 0.05,
+    'wfc3'    : 0.03962,
     'nircaml' : 0.063,
     'nircams' : 0.031,
 }
@@ -257,13 +259,14 @@ def euclidean_distance(filename,
         elif unit_of_dist.lower() == 'pc' or unit_of_dist.lower() == 'parsec':
             dist = dist * instrument_pixtoarcs[instrument] * arcsectopc
         elif unit_of_dist.lower() == 'km' or unit_of_dist.lower() == 'kilometer':
-            dist = dist * instrument_pixtoarcs[instrument] * arcsectopc * 3.086e+13
+            # https://www.unitconverters.net/length/parsec-to-kilometer.htm
+            dist = dist * instrument_pixtoarcs[instrument] * arcsectopc * 30856775812800 
 
-        df[f'Distance ({unit_of_dist})'] = dist
+        df[f'Distance'] = dist
         object_id = f'{catalog} ID'
         object_ra = f'{catalog} RA'
         object_dec = f'{catalog} Dec'
-        object_dist = f'Distance ({unit_of_dist})'
+        object_dist = 'Distance'
         object_cols.extend([object_id, object_ra, object_dec, object_dist])
 
     if shorten_df: 
@@ -278,13 +281,13 @@ class XrayBinary:
     def __init__(self, df):
         self.df = df.copy()
         if 'X' in self.df.columns:
-            self.x = self.df['X']
+            self.x = self.df['X'].values
         if 'Y' in self.df.columns:
-            self.y = self.df['Y']
+            self.y = self.df['Y'].values
         if 'RA' in self.df.columns:
-            self.ra = self.df['RA']
+            self.ra = self.df['RA'].values
         if 'Dec' in self.df.columns:
-            self.dec = self.df['Dec']
+            self.dec = self.df['Dec'].values
 
     def _repr_html_(self):
         return self.df._repr_html_()
@@ -329,6 +332,15 @@ class XrayBinary:
         `Crossref`'d dataframe'''
         if isinstance(cluster_name, str): cluster_name = [cluster_name]
         if isinstance(cluster_region, str): cluster_region = [cluster_region]
+
+        # Delete the headers related to the cluster_name from previous iterations of Crossref
+        if f'{cluster_name[0]} ID' in self.df.columns:
+            self.df.drop(f'{cluster_name[0]} ID', axis=1, inplace=True)
+        if f'{cluster_name[0]} RA' in self.df.columns:
+            self.df.drop(f'{cluster_name[0]} RA', axis=1, inplace=True)
+        if f'{cluster_name[0]} Dec' in self.df.columns:
+            self.df.drop(f'{cluster_name[0]} Dec', axis=1, inplace=True)
+
         self.df = Crossref(
             df=self.df,
             regions=cluster_region,
@@ -355,14 +367,10 @@ class XrayBinary:
             outfile='XRB_to_cluster.txt',
             frame='fk5',
             unit_of_coords='deg',
-            unit_of_dist='pc',
+            unit_of_dist='km',
             arcsectopc=45.4,
             shorten_df=False,
-            additional_cols=[],
-            calculate_velocity=False,
-            velocity_headers=['Distance', 'Age'],
-            calc_velocity_err=False,
-            velocity_err_headers=['Distance Err', 'Age Err']
+            additional_cols=[]
     ):
         '''A method to calculate the distances between XRBs and clusters.
         
@@ -384,15 +392,6 @@ class XrayBinary:
             Default is False
         additional_cols : list
             Additional columns to add to the output dataframe. Default is an empty list.
-        calculate_velocity : bool
-            If `True`, calculates the velocity of ejection of an XRB from a star cluster.
-        velocity_headers : list(str)
-            A list containing the distance and the time headers for velocity calculation. 
-            First input distance and then time. 
-        calc_velocity_err : bool
-            If `True`, also finds the error in the velocity of ejection. Default is False
-        velocity_err_headers : list(str)
-            A list containing the headers for the errors in distance and time, respectively.
 
         Parameters
         ----------
@@ -401,6 +400,7 @@ class XrayBinary:
         '''
         if isinstance(cluster_name, str): cluster_name = [cluster_name]
         if isinstance(cluster_region, str): cluster_region = [cluster_region]
+
         self.crossref(
             cluster_region=cluster_region,
             cluster_name=cluster_name,
@@ -408,65 +408,31 @@ class XrayBinary:
             search_radius=search_radius,
             coordsys=coordsys,
             coordheads=coordheads,
-            outfile=outfile,
-
+            outfile=outfile
         )
 
         self._get_coords(cluster_region, cluster_name)
 
-        self._euclidean_distance(
-            filename,
-            cluster_name,
-            instrument,
-            frame,
-            unit_of_coords,
-            unit_of_dist,
-            arcsectopc,
-            shorten_df,
-            additional_cols
+        self.df = euclidean_distance(
+             filename=filename,
+             df=self.df,
+             catalogs=cluster_name,
+             instrument=instrument,
+             frame=frame,
+             unit_of_coords=unit_of_coords,
+             unit_of_dist=unit_of_dist,
+             arcsectopc=arcsectopc,
+             shorten_df=shorten_df,
+             additional_cols=additional_cols
         )
-        if calculate_velocity:
-            self.calculate_velocity(
-                velocity_headers=velocity_headers,
-                calc_err=calc_velocity_err,
-                err_headers=velocity_err_headers
-            )
 
         self.df = self.df.query(f'`{cluster_name[0]} ID`.notnull()').reset_index(drop=True)
+        self.distance = self.df['Distance'].values
         return self.df
     
     def _get_coords(self, cluster_region, cluster_name):
         '''A helper method to extract coordinates.'''
         self.df = get_coords(self.df, cluster_region, cluster_name)
-        return self.df
-            
-
-    def _euclidean_distance(
-            self,
-            filename,
-            cluster_name,
-            instrument,
-            frame='fk5',
-            unit_of_coords='deg',
-            unit_of_dist='pc',
-            arcsectopc=45.4,
-            shorten_df=False,
-            additional_cols=[]
-):
-        '''A helper method to calculate the euclidean distance between XRBs and clusters.'''
-        self.df = euclidean_distance(
-            filename=filename,
-            instrument=instrument,
-            df=self.df,
-            catalogs=cluster_name,
-            frame=frame,
-            unit_of_coords=unit_of_coords,
-            unit_of_dist=unit_of_dist,
-            arcsectopc=arcsectopc,
-            shorten_df=shorten_df,
-            additional_cols=additional_cols
-        )
-
         return self.df
     
     def calculate_velocity(
@@ -499,13 +465,14 @@ class XrayBinary:
         the cluster. If `calc_err=True`, calculates the errors in the velocity.
         '''
         time = self.df[velocity_headers[1]].values * 31556952000000 # https://www.unitsconverters.com/en/Millionyears-To-Second/Unittounit-5988-91
-        self.df['Velocity (km/s)'] = self.df[velocity_headers[0]] / time
+        self.df['Velocity'] = self.df[velocity_headers[0]] / time
         if calc_err:
             d, d_err = self.df[velocity_headers[0]], self.df[velocity_headers[0]]
             t, t_err = self.df[velocity_err_headers[1]], self.df[velocity_err_headers[1]]
             err = np.sqrt((d_err / d) ** 2 + (t_err / t) ** 2)
-            self.df['Velocity Err (km/s)'] = self.df['Velocity (km/s)'] * err
+            self.df['Velocity Err'] = self.df['Velocity'] * err
 
+        self.velocity = self.df['Velocity'].values
         return self.df
     
     def make_regions(
@@ -537,3 +504,13 @@ class XrayBinary:
             width=width,
             fontsize=fontsize
         )
+
+    def make_kde_plot(self, x, bw_adjust,
+                      label='Distance to the nearest cluster',
+                      fill=True, alpha=0.5, **kwargs
+                      ):
+        sns.kdeplot(x=x, bw_adjust=bw_adjust,
+                    fill=True, alpha=0.5,
+                    **kwargs)
+        plt.xlabel(label)
+        plt.show()
