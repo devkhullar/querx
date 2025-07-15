@@ -1,12 +1,12 @@
 import numpy as np
 import pandas as pd
-from XRBID.WriteScript import WriteReg
 from XRBID.DataFrameMod import Find
 from XRBID.CMDs import FitSED
 from XRBID.Sources import Crossref, GetCoords, GetIDs
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
+from helpers.regions import WriteReg
 
 chandra_jwst_dir = "/Users/undergradstudent/Research/XRB-Analysis/Galaxies/M66/Chandra-JWST/"
 input_model = '/Users/undergradstudent/Research/XRB-Analysis/jwst-models/isochrone-query-step-0_009.dat'
@@ -35,6 +35,15 @@ columns={
     'F335M Err': 'F335Mmag Err',
     'F360M Err': 'F360Mmag Err'
 }
+
+instrument_pixtoarcs = {
+    'acs' : 0.05,
+    'wfc3' : 0.03962,
+    'nircaml' : 0.063,
+    'nircams' : 0.031,
+}
+
+arcsectopc = 45.4 # https://iopscience.iop.org/article/10.3847/1538-4357/ace162
 
 def find_absorption(
     df_photometry,
@@ -131,138 +140,9 @@ def find_absorption(
 
     return absorption
 
-
-def get_coords(extinction_df, coords_df):
-    '''Returns the dataframe with the associated RA and Dec coordinates
-    of the XRB candidates.
-    '''
-    temp = extinction_df.copy()
-    temp['RA'] = ''
-    temp['Dec'] = ''
-    for index, row in coords_df.iterrows():
-        for ind, ro in temp.iterrows():
-            condition1 = (coords_df['CSC ID'][index] == temp['CSC ID'][ind])
-            condition2 = (coords_df['StarID'][index] == temp['StarID'][ind])
-            if condition1 and condition2:
-                temp['RA'][ind] = coords_df['RA'][index]
-                temp['Dec'][ind] = coords_df['Dec'][index]
-    
-    return temp
-
-def change_columns(df, columns=columns):
-    df = df.rename(columns=columns)
-    return df
-
 def remove_unnamed(df):
     df = df.loc[:, ~df.columns.str.contains('^Unnamed')]
     return df
-
-def look_at_df(df):
-    pd.set_option('display.max_rows', None)
-    pd.set_option('display.max_columns', None)
-    # If needed, control the width of columns to avoid line wrapping
-    pd.set_option('display.width', 1000)
-    # If needed, adjust the max column width
-    pd.set_option('display.max_colwidth', None)
-
-    display(df)
-
-def compare_dfs(df1, df2, 
-                condition1, condition2):
-    '''Compare two dataframes and create a new dataframe out
-    of the first dataframe based on the given conditions.
-    
-    Parameters
-    ----------
-    df1 : pd.DataFrame
-        Dataframe that will be used to create the new dataframe
-    df2 : pd.DataFrame
-        Dataframe to be compared with.
-    condition1, condition2 : str or list
-        Conditions to be used to compare the dfs. If list, pass 2
-        conditions and the conditions must be the string headers that 
-        will be compared between the dataframes.
-
-    Example
-    -------
-    best_stars = compare_dfs(daoclean, M66_sources, 
-                         'CSC ID', ['StarID', 'Best Star'])
-    >>> will loop through the dfs to compare CSC IDs and then compare
-    >>> the first dataframe's 'StarID' property with the second frame's
-    >>> 'Best Star' header
-    '''
-    
-    temp = pd.DataFrame()
-    if isinstance(condition1, list):
-        assert(len(condition1) == 2)
-        condition1a = condition1[0]
-        condition1b = condition1[1]
-    else: 
-        condition1a, condition1b = condition1, condition1
-    if isinstance(condition2, list):
-        assert(len(condition2) == 2)
-        condition2a = condition2[0]
-        condition2b = condition2[1]
-    else: 
-        condition2a, condition2b = condition2, condition2
-
-    for index1, row1 in df1.iterrows():
-        for index2, row2 in df2.iterrows():
-            condition1 = (df1[condition1a][index1] == df2[condition1b][index2])
-            condition2 = (df1[condition2a][index1] == df2[condition2b][index2])
-            if condition1 and condition2:
-                temp = temp._append(df1.iloc[index1], ignore_index=True)
-
-    return temp
-
-# class XrayBinary:
-#     def __init__(self, df):
-#         self.df = df.copy()
-#         self.RA = df['RA'].values
-#         self.Dec = df['Dec'].values
-#         if 'CSC ID' in self.df.columns: 
-#             self.cscid = self.df['CSC ID'].values
-#         if 'X' in self.df.columns: self.x = self.df['X'].values
-#         if 'Y' in self.df.columns: self.y = self.df['Y'].values  
-
-#     def crossref(self, clusters, catalogs, search_radius=3, sourceid='CSC ID',
-#                  outfile='xrb_to_cluster_crossref.txt'):
-#         '''A method to crossreference between the X-ray Binaries and clusters. 
-        
-#         This method will first `Crossref` between the X-ray Binaries and clusters
-#         to study the ejection of X-ray Binaries from star clusters and add the RA and Dec
-#         coordinates of those crossreferences to the current dataframe. 
-
-#         Parameters
-#         ----------
-#         clusters : ds9 regions files, list
-#             DS9 regions files of the clusters to crossreference between
-#             the X-ray Binaries and the clusters. The coordinates must in fk5.
-#         catalogs : list 
-#             Name of the catalogs associated with the region files.
-#         Returns
-#         -------
-#         crossref_df : pd.DataFrame
-#             Crossreferenced dataframe containing the IDs and coordinates of clusters.
-#         '''
-
-#         # Make sure that the cluster regions and the list of their names are of the same size
-#         # assert(len(clusters) == len(catalogs))
-
-#         df = Crossref(
-#             df=self.df,
-#             regions=clusters,
-#             catalogs=catalogs,
-#             sourceid=sourceid,
-#             search_radius=search_radius,
-#             coordsys='fk5',
-#             coordheads=['RA', 'Dec'],
-#             outfile=outfile
-#         )
-
-#         df = get_coords(df, clusters, catalogs)
-#         # self.df = crossref_df
-#         # return crossref_df
 
 def get_coords(df, regions, catalogs):
     '''A helper function to extract the coordinates and IDs of clusters
@@ -285,44 +165,14 @@ def get_coords(df, regions, catalogs):
 
     return df
 
-def calculate_distances(
-        df,
-        regions,
-        catalogs,
-        sourceid='CSC ID',
-        search_radius=0.005,
-        coordsys='fk5',
-        coordheads=['RA', 'Dec'],
-        outfile='XRB_to_cluster.txt',
-        calculate_velocity=True,
-):
-    '''Calculate the distance between XRBs and clusters.'''
-    crossref_df = Crossref(
-        df=df,
-        regions=regions,
-        catalogs=catalogs,
-        sourceid=sourceid,
-        search_radius=search_radius,
-        coordsys=coordsys,
-        coordheads=coordheads,
-        outfile=outfile,
-    )
-
-    crossref_df = get_coords(crossref_df, regions, catalogs)
-
-    if calculate_velocity:
-        pass
-
-    return crossref_df
-
 def euclidean_distance(filename,
                        df,
                        catalogs, 
+                       instrument,
                        frame='fk5', 
                        unit_of_coords='deg', 
-                       unit_of_dist='pix',
-                       instrument=None,
-                       pixtoarcs=None,
+                       unit_of_dist='km',
+                       arcsectopc=45.4,
                        shorten_df=False,
                        additional_cols=[]
 ):
@@ -337,6 +187,11 @@ def euclidean_distance(filename,
     catalogs : list
         list containing the names of the objects being compared to.
         Default is 'fk5'
+    instrument : str
+    The instrument of the base image. Required to convert coordinates to coordinates
+    other than pixels. Default is `None`. Other options include 'wfc3', 'acs', 
+    'nircamL' for long wavelength with NIRCam and 'nircamS' for short wavelength
+    with NIRCam.
     frame : str
         The reference coordinate frame of the object. Will be used to 
         convert coordinates to pixels. Default is 'fk5.
@@ -344,15 +199,11 @@ def euclidean_distance(filename,
         The units of the coordinates that are being extracted from the dataframe.
         Default is 'deg'
     unit_of_dist : str
-        The units to use in the distances between the objects. Default is 'pix'.
-    instrument : str
-        The instrument of the base image. Required to convert coordinates to coordinates
-        other than pixels. Default is `None`. Other options include 'wfc3', 'acs', 
-        'nircamL' for long wavelength with NIRCam and 'nircamS' for short wavelength
-        with NIRCam.
-    pixtoarcs : float
-        The pixel to arcsecond conversion to use for changing coordinates to coordinates other
-        than pixels. Default is `None`. This parameter is not required to pass usually as the
+        The units to use in the distances between the objects. Default is 'km'.
+    arcsectopc : float
+        The arcsec to parsec conversion to use for changing coordinates to coordinates. Default is 45.4''
+        for the NGC 3627 galaxy.
+        This parameter is not required to pass usually as the
         `instrument` parameter uses the `pixtoarcs` conversion based upon the instrument being used.
     shorten_df : bool
         If `True`, provides a smaller dataframe containing only the CSC ID, coordinates (image and others)
@@ -383,11 +234,11 @@ def euclidean_distance(filename,
 
     arr = np.array([x, y]).T
 
-    cmpr_cols = []
+    object_cols = []
 
     # Extract the coordinates that are going to be used to calculate 
     # the distance to the first object
-    cmpr_cols = []
+    object_cols = []
     for catalog in catalogs:
         if (f'{catalog} X' and f'{catalog} Y') in df.columns:
             x1, y1 = df[f'{catalog} X'].values, df[f'{catalog} Y'].values
@@ -397,33 +248,292 @@ def euclidean_distance(filename,
 
         # the comparison array contains the coordinates which will calculate
         # the distance of the first object to these objects.
-        cmpr_arr = np.array([x1, y1]).T
+        object_arr = np.array([x1, y1]).T
 
-        dist = np.array([np.linalg.norm(arr[i] - cmpr_arr[i]) for i in range(len(df))])
+        dist = np.array([np.linalg.norm(arr[i] - object_arr[i]) for i in range(len(df))])
         # Incorporate unit conversion to also include arcsecs
-        if unit_of_dist == 'arcsec':
-            if instrument:
-                if instrument.lower() == 'acs':
-                    pixtoarcs = 0.05
-                elif instrument.lower() == 'wfc3':
-                    pixtoarcs = 0.03962
-                    dist = dist * pixtoarcs
-                elif instrument.lower() == 'nircaml': # if Nircam long wavelength
-                    pixtoarcs = 0.063
-                    dist = dist * pixtoarcs
-                elif instrument.lower() == 'nircams': # if Nircam short wavelength
-                    pixtoarcs = 0.031
-                    dist = dist * pixtoarcs
-            elif pixtoarcs:
-                    if not pixtoarcs: input("Please input pixtoarcs") 
-                    dist = dist * pixtoarcs
+        if unit_of_dist.lower() == 'arcsec':
+            dist = dist * instrument_pixtoarcs[instrument]
+        elif unit_of_dist.lower() == 'pc' or unit_of_dist.lower() == 'parsec':
+            dist = dist * instrument_pixtoarcs[instrument] * arcsectopc
+        elif unit_of_dist.lower() == 'km' or unit_of_dist.lower() == 'kilometer':
+            dist = dist * instrument_pixtoarcs[instrument] * arcsectopc * 3.086e+13
 
-        df[f'Distance to {catalog} ({unit_of_dist})'] = dist
+        df[f'Distance ({unit_of_dist})'] = dist
+        object_id = f'{catalog} ID'
+        object_ra = f'{catalog} RA'
+        object_dec = f'{catalog} Dec'
+        object_dist = f'Distance ({unit_of_dist})'
+        object_cols.extend([object_id, object_ra, object_dec, object_dist])
 
-        cmpr_cols.extend([f'{catalog} RA', f'{catalog} Dec', f'Distance to {catalog} ({unit_of_dist})'])
-        print(cmpr_cols)
     if shorten_df: 
-        cols = ['CSC ID', 'X', 'Y', 'RA', 'Dec'] + cmpr_cols + additional_cols
+        cols = ['CSC ID', 'X', 'Y', 'RA', 'Dec'] + object_cols + additional_cols
         df = df[cols].reset_index(drop=True)
 
     return df
+
+class XrayBinary:
+    '''A class to study distances between XRBs and clusters along with doing
+    further science with them'''
+    def __init__(self, df):
+        self.df = df.copy()
+        if 'X' in self.df.columns:
+            self.x = self.df['X']
+        if 'Y' in self.df.columns:
+            self.y = self.df['Y']
+        if 'RA' in self.df.columns:
+            self.ra = self.df['RA']
+        if 'Dec' in self.df.columns:
+            self.dec = self.df['Dec']
+
+    def _repr_html_(self):
+        return self.df._repr_html_()
+
+    def __repr__(self):
+        return self.df.__repr__() # Or self.df.to_string() for full display
+
+    def __str__(self):
+        return self.df.__str__() # Or self.df.to_string() for full display
+    
+    def crossref(
+            self,
+            cluster_region,
+            cluster_name,
+            sourceid='CSC ID',
+            search_radius=0.005,
+            coordsys='fk5',
+            coordheads=['RA', 'Dec'],
+            outfile='XRB_to_cluster.txt',
+        ):
+        '''A method to `Crossref` between XRBs and clusters.
+        
+        Parameters
+        ----------
+        cluster_region : path, str
+            Path to the region file containing the cluster coordinates.
+        cluster_name : list, str
+            A list containing the name of the cluster.
+        sourceid : str
+            Header to use for the `Crossref`. Default is 'CSC ID'
+        search_radius : float
+            Search radius to `Crossref`. Will be in the same units as the `coordsys`.
+            Default is 0.005
+        coordheads: list, str
+            A list of strings containing the coordinate headers. Default is 
+            ['RA', 'Dec']
+        outfile : path
+            Path to download the output `Crossref`'d frame.
+        
+        Returns
+        -------
+        `Crossref`'d dataframe'''
+        if isinstance(cluster_name, str): cluster_name = [cluster_name]
+        if isinstance(cluster_region, str): cluster_region = [cluster_region]
+        self.df = Crossref(
+            df=self.df,
+            regions=cluster_region,
+            catalogs=cluster_name,
+            sourceid=sourceid,
+            search_radius=search_radius,
+            coordsys=coordsys,
+            coordheads=coordheads,
+            outfile=outfile,
+        )
+
+        return self.df
+
+    def calculate_distance(
+            self,
+            filename,
+            instrument,
+            cluster_region,
+            cluster_name,
+            search_radius=0.0005,
+            sourceid='CSC ID',
+            coordsys='fk5',
+            coordheads=['RA', 'Dec'],
+            outfile='XRB_to_cluster.txt',
+            frame='fk5',
+            unit_of_coords='deg',
+            unit_of_dist='pc',
+            arcsectopc=45.4,
+            shorten_df=False,
+            additional_cols=[],
+            calculate_velocity=False,
+            velocity_headers=['Distance', 'Age'],
+            calc_velocity_err=False,
+            velocity_err_headers=['Distance Err', 'Age Err']
+    ):
+        '''A method to calculate the distances between XRBs and clusters.
+        
+        This method is calculating the Euclidean norm by converting the input coordinates
+        to pixels and then performing the euclidean norm on them. 
+
+        Parametes
+        ---------
+        First few parameters the same as Crossref
+        frame : str
+            The coordinate reference frame to use to convert coordinates to pixels. 
+            Default is 'fk5'.
+        unit_of_coords : str,
+            The units in which the coordinates are being input. Default is 'deg',
+        arcsectopc : float
+            The arcsec to parsec conversion. Default is 45.4 for the NGC 3626 galaxy
+        shorten_df : bool
+            If `True`, shortens the dataframe to only include the IDs and coordinates.
+            Default is False
+        additional_cols : list
+            Additional columns to add to the output dataframe. Default is an empty list.
+        calculate_velocity : bool
+            If `True`, calculates the velocity of ejection of an XRB from a star cluster.
+        velocity_headers : list(str)
+            A list containing the distance and the time headers for velocity calculation. 
+            First input distance and then time. 
+        calc_velocity_err : bool
+            If `True`, also finds the error in the velocity of ejection. Default is False
+        velocity_err_headers : list(str)
+            A list containing the headers for the errors in distance and time, respectively.
+
+        Parameters
+        ----------
+        A dataframe containing the distances from star clusters to XRBs. If `calculate_velocity=True`,
+        also finds the velocity of ejection of the XRBs from the candidate clusters.
+        '''
+        if isinstance(cluster_name, str): cluster_name = [cluster_name]
+        if isinstance(cluster_region, str): cluster_region = [cluster_region]
+        self.crossref(
+            cluster_region=cluster_region,
+            cluster_name=cluster_name,
+            sourceid=sourceid,
+            search_radius=search_radius,
+            coordsys=coordsys,
+            coordheads=coordheads,
+            outfile=outfile,
+
+        )
+
+        self._get_coords(cluster_region, cluster_name)
+
+        self._euclidean_distance(
+            filename,
+            cluster_name,
+            instrument,
+            frame,
+            unit_of_coords,
+            unit_of_dist,
+            arcsectopc,
+            shorten_df,
+            additional_cols
+        )
+        if calculate_velocity:
+            self.calculate_velocity(
+                velocity_headers=velocity_headers,
+                calc_err=calc_velocity_err,
+                err_headers=velocity_err_headers
+            )
+
+        self.df = self.df.query(f'`{cluster_name[0]} ID`.notnull()').reset_index(drop=True)
+        return self.df
+    
+    def _get_coords(self, cluster_region, cluster_name):
+        '''A helper method to extract coordinates.'''
+        self.df = get_coords(self.df, cluster_region, cluster_name)
+        return self.df
+            
+
+    def _euclidean_distance(
+            self,
+            filename,
+            cluster_name,
+            instrument,
+            frame='fk5',
+            unit_of_coords='deg',
+            unit_of_dist='pc',
+            arcsectopc=45.4,
+            shorten_df=False,
+            additional_cols=[]
+):
+        '''A helper method to calculate the euclidean distance between XRBs and clusters.'''
+        self.df = euclidean_distance(
+            filename=filename,
+            instrument=instrument,
+            df=self.df,
+            catalogs=cluster_name,
+            frame=frame,
+            unit_of_coords=unit_of_coords,
+            unit_of_dist=unit_of_dist,
+            arcsectopc=arcsectopc,
+            shorten_df=shorten_df,
+            additional_cols=additional_cols
+        )
+
+        return self.df
+    
+    def calculate_velocity(
+            self,
+            velocity_headers=['Distance', 'Age'],
+            calc_err=False,
+            velocity_err_headers=['Distance Err', 'Age Err']
+    ):
+        '''Calculate the maximum velocity of ejection of an XRB from a cluster.
+        
+        Note
+        ----
+        The input distance should be in km and the input age should be in Myrs.
+
+        Parameters
+        ----------
+        velocity_headers : list(str)
+            List of headers containing the distances and ages of the clusters
+            respectively.
+        calc_err : bool
+            If `True`, finds the errors in the velocity of ejection of the
+            XRB from the cluster.
+        velocity_err_headers : list(str)
+            A list of strings containing the headers of the errors in distance 
+            and the age of the cluster respectively. 
+
+        Returns
+        ----------
+        A dataframe containing the velocity of ejection of the X-ray Binary from
+        the cluster. If `calc_err=True`, calculates the errors in the velocity.
+        '''
+        time = self.df[velocity_headers[1]].values * 31556952000000 # https://www.unitsconverters.com/en/Millionyears-To-Second/Unittounit-5988-91
+        self.df['Velocity (km/s)'] = self.df[velocity_headers[0]] / time
+        if calc_err:
+            d, d_err = self.df[velocity_headers[0]], self.df[velocity_headers[0]]
+            t, t_err = self.df[velocity_err_headers[1]], self.df[velocity_err_headers[1]]
+            err = np.sqrt((d_err / d) ** 2 + (t_err / t) ** 2)
+            self.df['Velocity Err (km/s)'] = self.df['Velocity (km/s)'] * err
+
+        return self.df
+    
+    def make_regions(
+        self,
+        outfile,
+        coordsys='fk5',
+        coordheads=['RA', 'Dec'],
+        reg_type='ruler',
+        additional_coords=False,
+        idheader='CSC ID',
+        color='blue',
+        radius=1,
+        radunit='arcsec',
+        width=1,
+        fontsize=10,
+
+    ):
+        WriteReg(
+            sources=self.df,
+            outfile=outfile,
+            coordsys=coordsys,
+            coordheads=coordheads,
+            reg_type=reg_type,
+            additional_coords=additional_coords,
+            idheader=idheader,
+            color=color,
+            radius=radius,
+            radunit=radunit,
+            width=width,
+            fontsize=fontsize
+        )
