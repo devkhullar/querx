@@ -9,6 +9,7 @@ from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
 from helpers.regions import WriteReg
+import astropy.units as u
 
 chandra_jwst_dir = "/Users/undergradstudent/Research/XRB-Analysis/Galaxies/M66/Chandra-JWST/"
 input_model = '/Users/undergradstudent/Research/XRB-Analysis/jwst-models/isochrone-query-step-0_009.dat'
@@ -167,7 +168,7 @@ def get_coords(df, regions, catalogs):
 
     return df
 
-def euclidean_distance(filename,
+def euclidean_distance(imagefilename,
                        df,
                        catalogs, 
                        instrument,
@@ -219,7 +220,7 @@ def euclidean_distance(filename,
         Dataframe containing the distances between the objects
     '''
     df = df.copy()
-    hdu = fits.open(filename)
+    hdu = fits.open(imagefilename)
     try: wcs = WCS(hdu['SCI'].header)
     except: wcs = WCS(hdu['PRIMARY'].header)
 
@@ -260,18 +261,62 @@ def euclidean_distance(filename,
             dist = dist * instrument_pixtoarcs[instrument] * arcsectopc
         elif unit_of_dist.lower() == 'km' or unit_of_dist.lower() == 'kilometer':
             # https://www.unitconverters.net/length/parsec-to-kilometer.htm
-            dist = dist * instrument_pixtoarcs[instrument] * arcsectopc * 30856775812800 
+            dist = dist * instrument_pixtoarcs[instrument] * arcsectopc * u.pc.to(u.km)
 
-        df[f'Distance'] = dist
+        df[f'{catalog} Separation ({unit_of_dist})'] = dist
         object_id = f'{catalog} ID'
         object_ra = f'{catalog} RA'
         object_dec = f'{catalog} Dec'
-        object_dist = 'Distance'
+        object_dist = f'{catalog} Separation ({unit_of_dist})'
         object_cols.extend([object_id, object_ra, object_dec, object_dist])
 
     if shorten_df: 
         cols = ['CSC ID', 'X', 'Y', 'RA', 'Dec'] + object_cols + additional_cols
         df = df[cols].reset_index(drop=True)
+
+    return df
+
+def calculate_distance(
+        df,
+        regions,
+        catalogs,
+        search_radius,
+        imagefilename,
+        instrument='wfc3',
+        coordsys='fk5',
+        coordheads=['RA', 'Dec'],
+        arcsectopc=45.5,
+        sourceid='CSC ID',
+        **kwargs
+):
+    df = df.copy()
+    if isinstance(regions, str): regions = [regions]
+    if isinstance(catalogs, str): catalogs = [catalogs]
+
+    # Crossref to find the sources withing the given prom
+    df = Crossref(
+        df=df,
+        regions=regions,
+        catalogs=catalogs,
+        search_radius=search_radius,
+        coordsys=coordsys,
+        coordheads=coordheads,
+        sourceid=sourceid
+    )
+
+    # get the coordinates and IDs of the catalog being crossref'd
+    df = get_coords(df=df, regions=regions, catalogs=catalogs)
+
+    # Find the euclidean distance between the sources within the input dataframe
+    # and the catalog being crossref'd
+    df = euclidean_distance(
+        df=df,
+        catalogs=catalogs,
+        imagefilename=imagefilename,
+        instrument=instrument,
+        arcsectopc=arcsectopc,
+        **kwargs
+    )
 
     return df
 
@@ -427,7 +472,7 @@ class XrayBinary:
         )
 
         self.df = self.df.query(f'`{cluster_name[0]} ID`.notnull()').reset_index(drop=True)
-        self.distance = self.df['Distance'].values
+        self.distance = self.df[f'Separation ({unit_of_dist})'].values
         return self.df
     
     def _get_coords(self, cluster_region, cluster_name):
@@ -465,12 +510,12 @@ class XrayBinary:
         the cluster. If `calc_err=True`, calculates the errors in the velocity.
         '''
         time = self.df[velocity_headers[1]].values * 31556952000000 # https://www.unitsconverters.com/en/Millionyears-To-Second/Unittounit-5988-91
-        self.df['Velocity'] = self.df[velocity_headers[0]] / time
+        self.df['Velocity (km/s)'] = self.df[velocity_headers[0]] / time
         if calc_err:
             d, d_err = self.df[velocity_headers[0]], self.df[velocity_headers[0]]
             t, t_err = self.df[velocity_err_headers[1]], self.df[velocity_err_headers[1]]
             err = np.sqrt((d_err / d) ** 2 + (t_err / t) ** 2)
-            self.df['Velocity Err'] = self.df['Velocity'] * err
+            self.df['Velocity Err (km/s)'] = self.df['Velocity (km/s)'] * err
 
         self.velocity = self.df['Velocity'].values
         return self.df
