@@ -213,7 +213,6 @@ def euclidean_distance(imagefilename,
         as well as the distances. Default is False
     additional_cols : list of strings
         Additional columns to include in the shortened dataframe
-
     Returns
     -------
     df : pd.Dataframe
@@ -254,23 +253,23 @@ def euclidean_distance(imagefilename,
         object_arr = np.array([x1, y1]).T
 
         dist = np.array([np.linalg.norm(arr[i] - object_arr[i]) for i in range(len(df))])
-        # Incorporate unit conversion to also include arcsecs
-        if unit_of_dist.lower() == 'arcsec':
-            dist = dist * instrument_pixtoarcs[instrument]
-        elif unit_of_dist.lower() == 'pc' or unit_of_dist.lower() == 'parsec':
-            dist = dist * instrument_pixtoarcs[instrument] * arcsectopc
-        elif unit_of_dist.lower() == 'km' or unit_of_dist.lower() == 'kilometer':
-            # https://www.unitconverters.net/length/parsec-to-kilometer.htm
-            dist = dist * instrument_pixtoarcs[instrument] * arcsectopc * u.pc.to(u.km)
+        # Save arcsec coords 
+        dist = dist * instrument_pixtoarcs[instrument]
+        df[f'{catalog} Separation (arcsecs)'] = dist
+        # convert from arcsec to parsecs
+        dist = dist * arcsectopc 
+        df[f'{catalog} Separation (pc)'] = dist
+        # convert from parsecs to km
+        dist = dist * u.pc.to(u.km)
 
         df[f'{catalog} Separation ({unit_of_dist})'] = dist
+
+    if shorten_df: 
         object_id = f'{catalog} ID'
         object_ra = f'{catalog} RA'
         object_dec = f'{catalog} Dec'
         object_dist = f'{catalog} Separation ({unit_of_dist})'
         object_cols.extend([object_id, object_ra, object_dec, object_dist])
-
-    if shorten_df: 
         cols = ['CSC ID', 'X', 'Y', 'RA', 'Dec'] + object_cols + additional_cols
         df = df[cols].reset_index(drop=True)
 
@@ -317,6 +316,33 @@ def calculate_distance(
         arcsectopc=arcsectopc,
         **kwargs
     )
+
+    df = df.query(f'`{catalogs[0]} ID`.notnull()').reset_index(drop=True)
+    return df
+
+def calculate_velocity(df, coordheads, catalog='Cluster', errorheads=False,
+                       shorten_df=False, idheader='ID', additional_cols=[],
+                       distance_unit='km', time_unit='s'):
+    '''Calculate the velocity of ejection of an XRB from a candidate host cluster.'''
+    print("Make sure that the distances and ages are in km and seconds respectively...")
+    df = df.copy()
+    # The `astype(float)` method helped prevent a bug in the calculations
+    dist, time = df[coordheads[0]].astype(float).values, df[coordheads[1]].astype(float).values
+    df[f'{catalog} Velocity ({distance_unit}/{time_unit})'] = dist / time
+    if errorheads:
+        dist_err, time_err = df[errorheads[0]].astype(float).values, df[errorheads[1]].astype(float).values
+        err = np.sqrt((dist_err / dist) ** 2 + (time_err / time) ** 2)
+        df[f'{catalog} Velocity Err ({distance_unit}/{time_unit})'] = df[f'{catalog} Velocity (km/s)'].values * err
+    
+    if shorten_df and errorheads:
+        cols = [idheader] + additional_cols \
+                + [f'{catalog} Velocity ({distance_unit}/{time_unit})',
+                f'{catalog} Velocity Err ({distance_unit}/{time_unit})']
+        df = df[cols]
+    elif shorten_df: 
+        cols = [idheader] + additional_cols \
+                + [f'{catalog} Velocity ({distance_unit}/{time_unit})']
+        df = df[cols]
 
     return df
 
@@ -459,7 +485,7 @@ class XrayBinary:
         self._get_coords(cluster_region, cluster_name)
 
         self.df = euclidean_distance(
-             filename=filename,
+             imagefilename=filename,
              df=self.df,
              catalogs=cluster_name,
              instrument=instrument,
@@ -472,7 +498,7 @@ class XrayBinary:
         )
 
         self.df = self.df.query(f'`{cluster_name[0]} ID`.notnull()').reset_index(drop=True)
-        self.distance = self.df[f'Separation ({unit_of_dist})'].values
+        self.distance = self.df[f'{cluster_name[0]} Separation ({unit_of_dist})'].values
         return self.df
     
     def _get_coords(self, cluster_region, cluster_name):
@@ -517,7 +543,7 @@ class XrayBinary:
             err = np.sqrt((d_err / d) ** 2 + (t_err / t) ** 2)
             self.df['Velocity Err (km/s)'] = self.df['Velocity (km/s)'] * err
 
-        self.velocity = self.df['Velocity'].values
+        self.velocity = self.df['Velocity (km/s)'].values
         return self.df
     
     def make_regions(
