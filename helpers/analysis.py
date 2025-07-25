@@ -172,6 +172,7 @@ def euclidean_distance(imagefilename,
                        df,
                        catalogs, 
                        instrument,
+                       coordheads=['RA', 'Dec'],
                        frame='fk5', 
                        unit_of_coords='deg', 
                        unit_of_dist='km',
@@ -231,7 +232,7 @@ def euclidean_distance(imagefilename,
     # if 'X' and 'Y' in df.columns:
     #     x, y = df['X'].values, df['Y'].values
     # else: 
-    ra, dec = df['RA'].values, df['Dec'].values
+    ra, dec = df[coordheads[0]].values, df[coordheads[1]].values
     x, y = SkyCoord(ra, dec, frame=frame, unit=unit_of_coords).to_pixel(wcs)
 
     arr = np.array([x, y]).T
@@ -302,6 +303,7 @@ def calculate_distance(
         coordheads=coordheads,
         sourceid=sourceid
     )
+    print("Crossrefing done...")
 
     # get the coordinates and IDs of the catalog being crossref'd
     df = get_coords(df=df, regions=regions, catalogs=catalogs)
@@ -311,12 +313,14 @@ def calculate_distance(
     df = euclidean_distance(
         df=df,
         catalogs=catalogs,
+        coordheads=coordheads,
         imagefilename=imagefilename,
         instrument=instrument,
         arcsectopc=arcsectopc,
         **kwargs
     )
 
+    print("Done! Calculated Distances...")
     df = df.query(f'`{catalogs[0]} ID`.notnull()').reset_index(drop=True)
     return df
 
@@ -328,20 +332,20 @@ def calculate_velocity(df, coordheads, catalog='Cluster', errorheads=False,
     df = df.copy()
     # The `astype(float)` method helped prevent a bug in the calculations
     dist, time = df[coordheads[0]].astype(float).values, df[coordheads[1]].astype(float).values
-    df[f'{catalog} Velocity ({distance_unit}/{time_unit})'] = dist / time
+    df[f'Min {catalog} Velocity ({distance_unit}/{time_unit})'] = dist / time
     if errorheads:
         dist_err, time_err = df[errorheads[0]].astype(float).values, df[errorheads[1]].astype(float).values
         err = np.sqrt((dist_err / dist) ** 2 + (time_err / time) ** 2)
-        df[f'{catalog} Velocity Err ({distance_unit}/{time_unit})'] = df[f'{catalog} Velocity (km/s)'].values * err
+        df[f'Min {catalog} Velocity Err ({distance_unit}/{time_unit})'] = df[f'Min {catalog} Velocity (km/s)'].values * err
     
     if shorten_df and errorheads:
         cols = [idheader] + additional_cols \
-                + [f'{catalog} Velocity ({distance_unit}/{time_unit})',
-                f'{catalog} Velocity Err ({distance_unit}/{time_unit})']
+                + [f'MIn {catalog} Velocity ({distance_unit}/{time_unit})',
+                f'Min {catalog}  Velocity Err ({distance_unit}/{time_unit})']
         df = df[cols]
     elif shorten_df: 
         cols = [idheader] + additional_cols \
-                + [f'{catalog} Velocity ({distance_unit}/{time_unit})']
+                + [f'Min {catalog} Velocity ({distance_unit}/{time_unit})']
         df = df[cols]
 
     return df
