@@ -255,3 +255,46 @@ def calculate_velocity(df, coordheads, catalog='Cluster', errorheads=False,
 
     return df
 
+def find_parent_cluster(
+        df, 
+        cluster_age_head='Cluster Age (Myr)',
+        cluster_age_err_head='Cluster Age Err (Myr)', 
+        star_age_head='Star Age (Myr)', 
+        dist='Cluster Separation (pc)',
+        fit_type='wls'
+    ):
+    '''The weighted least squares implementation to find the parent cluster
+    for each X-ray source.
+    '''
+    df = df.copy()
+    parent_cluster = pd.DataFrame()
+    stellar_age = df[star_age_head].values
+    cluster_age = df[cluster_age_head].values
+    cluster_age_err = df[cluster_age_err_head].values
+
+    if fit_type.lower() == 'wls':
+        test_statistic = (cluster_age - stellar_age) ** 2 / (cluster_age_err) ** 2
+
+    else:
+        # Give less weightage to the errors
+        dist = df[dist].values
+        test_statistic = (cluster_age - stellar_age) ** 2 / (cluster_age_err / dist)
+
+    df['XRB-Parent Test Statistic'] = test_statistic
+
+    # df contains each star associated with a cluster within 1000 pc
+    # Need unique IDs to find the star-cluster pairs for each X-ray source
+    # with the least test statistic
+
+        # if not np.isnan(smallest_test_statistic):
+        #     candidate_cluster = temp.query(f'`Fit Test Statistic` == {smallest_test_statistic}')\
+        #                                .reset_index(drop=True)#.iloc[[0]]
+        #     parent_cluster = pd.concat([parent_cluster, candidate_cluster]).reset_index(drop=True)
+        # elif np.isnan(smallest_test_statistic) and np.isnan(temp[star_age_head].mean()):
+        #     print(f'Nan values in the star age {id}')
+        #     pass
+        # else:
+        #     print(f"Something else seems to be the issue for {id}!")
+    return df
+
+# def wls_find_cluster_parent()
