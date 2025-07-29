@@ -281,20 +281,4 @@ def find_parent_cluster(
         test_statistic = (cluster_age - stellar_age) ** 2 / (cluster_age_err / dist)
 
     df['XRB-Parent Test Statistic'] = test_statistic
-
-    # df contains each star associated with a cluster within 1000 pc
-    # Need unique IDs to find the star-cluster pairs for each X-ray source
-    # with the least test statistic
-
-        # if not np.isnan(smallest_test_statistic):
-        #     candidate_cluster = temp.query(f'`Fit Test Statistic` == {smallest_test_statistic}')\
-        #                                .reset_index(drop=True)#.iloc[[0]]
-        #     parent_cluster = pd.concat([parent_cluster, candidate_cluster]).reset_index(drop=True)
-        # elif np.isnan(smallest_test_statistic) and np.isnan(temp[star_age_head].mean()):
-        #     print(f'Nan values in the star age {id}')
-        #     pass
-        # else:
-        #     print(f"Something else seems to be the issue for {id}!")
     return df
-
-# def wls_find_cluster_parent()
