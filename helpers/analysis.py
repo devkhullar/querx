@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 from XRBID.DataFrameMod import Find
 from XRBID.CMDs import WLS
@@ -291,7 +292,10 @@ def FitCCD(
         models,
         idheader,
         min_models=5, 
-        min_measures=2
+        min_measures=2,
+        plotCCD=False,
+        xcolor=['F555W', 'F814W'],
+        ycolor=['F438W', 'F555W'],
 ):
     '''Fit cluster(s) on a CCD to find their age. 
 
@@ -306,6 +310,7 @@ def FitCCD(
 
     photheads = [f'{filt[0]} - {filt[1]}' for filt in filter_list]
     errorheads = [f'{filt[0]} - {filt[1]} Err' for filt in filter_list]
+
     # Find the colours and errors in colours with the cluster catalog
     for filt in filter_list:
         df[f'{filt[0]} - {filt[1]}'] = df[filt[0]] - df[filt[1]]
@@ -319,6 +324,7 @@ def FitCCD(
     for filt in v_filters:
         isoTemp[f'{filt[0][2:]} - {filt[1][2:]}'] = isoTemp[filt[1]] - isoTemp[filt[0]]
     
+    # Prepare data for WLS
     sourcemags = [[df[f][i] for f in photheads] for i in range(len(df))]
     sourcemag_errs = [[df[e][i] for e in errorheads] for i in range(len(df))]
     sourceids = df[idheader].values.tolist()
@@ -328,9 +334,60 @@ def FitCCD(
                      sourcemag_errs, idheader, sourceids, 
                      min_models, min_measures)
     
+    if plotCCD:
+        plotCCD(df=df, modelframe=isoMatches, models=isoTemp, xcolor=xcolor,
+                ycolor=ycolor, idheader=idheader, fitheader='Test Statistic',)
+        
     return df, isoMatches
 
 def remove_duplicates(filters):
-    '''Remove the same filter combinations (eg. (F275W, F275W)) and return usable colors'''
+    '''Remove the same filter combinations (eg. ['F275W', 'F275W']) and return usable colors
+    (eg. [smaller filter, bigger filter])'''
     non_duplicates = [filt for filt in filters if filt[0] != filt[1] and filt[0] < filt[1]]
     return non_duplicates
+
+def plotCCD(df, modelframe, models, xcolor, 
+            ycolor, idheader, fitheader='Test Statistic', showtable=True):
+    df = df.copy()
+    models = models.copy()
+    modelframe['Age (Myr)'] = 10 ** modelframe['log-age-yr'] * u.yr.to(u.Myr)
+    # Plot the table
+    modelparams = ['log-age-yr', 'Age (Myr)', fitheader, idheader]
+    
+    for clusterid in df[idheader].values.tolist():
+        # Plot the isochones 
+        # fig, (ax_plot, ax_table) = plt.subplots(1, 2, figsize=(10, 5))
+        x = models[f'V-{xcolor[1]}'] - models[f'V-{xcolor[0]}']
+        y = models[f'V-{ycolor[1]}'] - models[f'V-{ycolor[0]}']
+        plt.plot(x, y, c='k')
+
+        # Plot the data measurements
+        data = Find(df, f'{idheader} == {clusterid}')
+        xx = data[f'{xcolor[0]} - {xcolor[1]}']
+        yy = data[f'{ycolor[0]} - {ycolor[1]}']
+        plt.scatter(xx, yy, c='b')
+
+        # # Plot the ischochrone measurement for comparison
+        TempModel = modelframe.query(f'`{idheader}` == {clusterid}').reset_index(drop=True)
+        xxx = TempModel[f'V-{xcolor[1]}'] - TempModel[f'V-{xcolor[0]}']
+        yyy = TempModel[f'V-{ycolor[1]}'] - TempModel[f'V-{ycolor[0]}']
+        plt.scatter(xxx, yyy, c='red', alpha=0.5, marker='x', lw=1, edgecolors='black')
+        
+        plt.xlim(-3, 3)
+        plt.ylim(3, -3)
+        plt.xlabel(f'{xcolor[0]} - {xcolor[1]}')
+        plt.ylabel(f'{ycolor[0]} - {ycolor[1]}')
+
+        modelchis_all = TempModel['Test Statistic'].values.tolist()
+        chisort = sorted(enumerate(modelchis_all), key=lambda i: i[1]) # Sorting the fit parameters
+        modelparams_all = [[round(TempModel[p][m[0]],8) for p in modelparams] for m in chisort]
+        if showtable:
+            # bbox = [1,1-max(0.2,0.1*len(models)),1+(.25*len(modelparams)),max(0.2,0.1*len(models))]
+            bbox = [1, 1, 1, 1]
+            cell_colors = [['white']*len(modelparams)]*len(TempModel)
+            the_table = plt.table(cellText=modelparams_all, colLabels=modelparams, cellColours=cell_colors, bbox=bbox, 
+                        loc='center', cellLoc='center') 
+            the_table.auto_set_font_size(False)
+            the_table.set_fontsize(10)
+
+        plt.show()
