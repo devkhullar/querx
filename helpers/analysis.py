@@ -1,15 +1,18 @@
 import numpy as np
 import pandas as pd
-import seaborn as sns
-import matplotlib.pyplot as plt
+
 from XRBID.DataFrameMod import Find
-from XRBID.CMDs import FitSED
+from XRBID.CMDs import WLS
 from XRBID.Sources import Crossref, GetCoords, GetIDs
+
 from astropy.io import fits
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
-from helpers.regions import WriteReg
 import astropy.units as u
+
+from helpers.regions import WriteReg
+
+import itertools
 
 chandra_jwst_dir = "/Users/undergradstudent/Research/XRB-Analysis/Galaxies/M66/Chandra-JWST/"
 input_model = '/Users/undergradstudent/Research/XRB-Analysis/jwst-models/isochrone-query-step-0_009.dat'
@@ -282,3 +285,52 @@ def find_parent_cluster(
 
     df['XRB-Parent Test Statistic'] = test_statistic
     return df
+
+def FitCCD(
+        df, 
+        models,
+        idheader,
+        min_models=5, 
+        min_measures=2
+):
+    '''Fit cluster(s) on a CCD to find their age. 
+
+    NOTE: Make sure that if you are using the filter F275W, rename it to F225W
+    '''
+    df = df.copy()
+    isoTemp = models.copy()
+
+    filters = [filt for filt in df.columns.tolist() if filt[0]=="F" and filt[-1]=="W"]
+    filter_list = list(itertools.product(filters, filters))
+    filter_list = remove_duplicates(filter_list)
+
+    photheads = [f'{filt[0]} - {filt[1]}' for filt in filter_list]
+    errorheads = [f'{filt[0]} - {filt[1]} Err' for filt in filter_list]
+    # Find the colours and errors in colours with the cluster catalog
+    for filt in filter_list:
+        df[f'{filt[0]} - {filt[1]}'] = df[filt[0]] - df[filt[1]]
+        df[f'{filt[0]} - {filt[1]} Err'] = np.sqrt(df[f'{filt[0]} Err']**2 + df[f'{filt[1]} Err']**2)
+
+    # Find the colours in the models
+    v_filters = [filt for filt in isoTemp.columns.tolist() if len(filt) >1 and filt[2:] in filters]
+    v_filters = list(itertools.product(v_filters, v_filters))
+    v_filters = remove_duplicates(v_filters)
+
+    for filt in v_filters:
+        isoTemp[f'{filt[0][2:]} - {filt[1][2:]}'] = isoTemp[filt[1]] - isoTemp[filt[0]]
+    
+    sourcemags = [[df[f][i] for f in photheads] for i in range(len(df))]
+    sourcemag_errs = [[df[e][i] for e in errorheads] for i in range(len(df))]
+    sourceids = df[idheader].values.tolist()
+
+    # Find the cluster ages
+    isoMatches = WLS(df, isoTemp, photheads, sourcemags, 
+                     sourcemag_errs, idheader, sourceids, 
+                     min_models, min_measures)
+    
+    return df, isoMatches
+
+def remove_duplicates(filters):
+    '''Remove the same filter combinations (eg. (F275W, F275W)) and return usable colors'''
+    non_duplicates = [filt for filt in filters if filt[0] != filt[1] and filt[0] < filt[1]]
+    return non_duplicates
