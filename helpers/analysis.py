@@ -3,7 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 from XRBID.DataFrameMod import Find
-from XRBID.CMDs import WLS
+from XRBID.CMDs import WLS, PlotHR
 from XRBID.Sources import Crossref, GetCoords, GetIDs
 
 from astropy.io import fits
@@ -296,8 +296,9 @@ def FitCCD(
         plotCCD=False,
         xcolor=['F555W', 'F814W'],
         ycolor=['F438W', 'F555W'],
+        E_BV=0.08,
 ):
-    '''Fit cluster(s) on a CCD to find their age. 
+    '''Find the best fit cluster models from the CB07 models. 
 
     NOTE: Make sure that if you are using the filter F275W, rename it to F225W
     '''
@@ -313,7 +314,7 @@ def FitCCD(
 
     # Find the colours and errors in colours with the cluster catalog
     for filt in filter_list:
-        df[f'{filt[0]} - {filt[1]}'] = df[filt[0]] - df[filt[1]]
+        df[f'{filt[0]} - {filt[1]}'] = df[filt[0]] - df[filt[1]] + E_BV
         df[f'{filt[0]} - {filt[1]} Err'] = np.sqrt(df[f'{filt[0]} Err']**2 + df[f'{filt[1]} Err']**2)
 
     # Find the colours in the models
@@ -335,8 +336,9 @@ def FitCCD(
                      min_models, min_measures)
     
     if plotCCD:
-        plotCCD(df=df, modelframe=isoMatches, models=isoTemp, xcolor=xcolor,
-                ycolor=ycolor, idheader=idheader, fitheader='Test Statistic',)
+        PlotCCD(df=df, bestfit=isoMatches, models=isoTemp, xcolor=xcolor,
+                ycolor=ycolor, idheader=idheader, fitheader='Test Statistic',
+                showtable=True,)
         
     return df, isoMatches
 
@@ -346,17 +348,31 @@ def remove_duplicates(filters):
     non_duplicates = [filt for filt in filters if filt[0] != filt[1] and filt[0] < filt[1]]
     return non_duplicates
 
-def plotCCD(df, modelframe, models, xcolor, 
-            ycolor, idheader, fitheader='Test Statistic', showtable=True):
+def PlotCCD(
+        df, 
+        bestfit, 
+        models, 
+        xcolor, 
+        ycolor, 
+        idheader, 
+        label_ages=True,
+        model_color='gray',
+        fitheader='Test Statistic', 
+        showtable=True,
+        
+):
+    '''Convenience function to plot a CMD along with the data and bestfit measurements.
+    If `show_table = True`, also displays a table with the best fit models'''
     df = df.copy()
     models = models.copy()
-    modelframe['Age (Myr)'] = 10 ** modelframe['log-age-yr'] * u.yr.to(u.Myr)
+    bestfit = bestfit.copy()
+
+    bestfit['Age (Myr)'] = 10 ** bestfit['log-age-yr'] * u.yr.to(u.Myr)
     # Plot the table
-    modelparams = ['log-age-yr', 'Age (Myr)', fitheader, idheader]
+    modelparams = ['log-age-yr', 'Age (Myr)', fitheader]
     
     for clusterid in df[idheader].values.tolist():
         # Plot the isochones 
-        # fig, (ax_plot, ax_table) = plt.subplots(1, 2, figsize=(10, 5))
         x = models[f'V-{xcolor[1]}'] - models[f'V-{xcolor[0]}']
         y = models[f'V-{ycolor[1]}'] - models[f'V-{ycolor[0]}']
         plt.plot(x, y, c='k')
@@ -367,27 +383,59 @@ def plotCCD(df, modelframe, models, xcolor,
         yy = data[f'{ycolor[0]} - {ycolor[1]}']
         plt.scatter(xx, yy, c='b')
 
-        # # Plot the ischochrone measurement for comparison
-        TempModel = modelframe.query(f'`{idheader}` == {clusterid}').reset_index(drop=True)
+        # Plot the best fit measurement for comparison
+        TempModel = bestfit.query(f'`{idheader}` == {clusterid}').reset_index(drop=True)
         xxx = TempModel[f'V-{xcolor[1]}'] - TempModel[f'V-{xcolor[0]}']
         yyy = TempModel[f'V-{ycolor[1]}'] - TempModel[f'V-{ycolor[0]}']
         plt.scatter(xxx, yyy, c='red', alpha=0.5, marker='x', lw=1, edgecolors='black')
         
-        plt.xlim(-3, 3)
-        plt.ylim(3, -3)
+        # plt.xlim(-3, 3)
+        # plt.ylim(3, -3)
+        plt.gca().invert_yaxis()
         plt.xlabel(f'{xcolor[0]} - {xcolor[1]}')
         plt.ylabel(f'{ycolor[0]} - {ycolor[1]}')
+
+        # Add the label ages marking 10 Myr and 400 Myr
+        if label_ages:
+            # Plotting the models for young and globular clusters
+            TempAge = Find(models, "log-age-yr = 7") # 10 Myrs
+
+            if isinstance(xcolor, list): xage = TempAge[f'{xcolor[0]} - {xcolor[1]}']
+            else: TempAge[x] = TempAge[xcolor]
+            if isinstance(ycolor, list): yage = TempAge[f'{ycolor[0]} - {ycolor[1]}']
+            else: yage = TempAge[ycolor]
+
+            plt.scatter(xage, yage, marker="*", color=model_color, s=75, zorder=5)
+            plt.annotate("10 Myrs", (xage, yage), zorder=900)
+
+            TempAge = Find(models, "log-age-yr = 8.606543") # ~400 Myr
+
+            if isinstance(xcolor, list): xage = TempAge[f'{xcolor[0]} - {xcolor[1]}']
+            else: TempAge[x] = TempAge[xcolor]
+            if isinstance(ycolor, list): yage = TempAge[f'{ycolor[0]} - {ycolor[1]}']
+            else: yage = TempAge[ycolor]
+
+            plt.scatter(xage, yage, marker="*", color=model_color, s=75, zorder=5)
+            plt.annotate("400 Myrs", (xage, yage), zorder=900)
 
         modelchis_all = TempModel['Test Statistic'].values.tolist()
         chisort = sorted(enumerate(modelchis_all), key=lambda i: i[1]) # Sorting the fit parameters
         modelparams_all = [[round(TempModel[p][m[0]],8) for p in modelparams] for m in chisort]
+                                     
         if showtable:
-            # bbox = [1,1-max(0.2,0.1*len(models)),1+(.25*len(modelparams)),max(0.2,0.1*len(models))]
-            bbox = [1, 1, 1, 1]
+            bbox = [1,1-max(0.2,0.1*len(TempModel)),1+(.25*len(modelparams)),max(0.2,0.1*len(TempModel))]
+            # bbox = [1, 1, 1, 1]
             cell_colors = [['white']*len(modelparams)]*len(TempModel)
-            the_table = plt.table(cellText=modelparams_all, colLabels=modelparams, cellColours=cell_colors, bbox=bbox, 
+            the_table = plt.table(cellText=modelparams_all, 
+                                  colLabels=modelparams, 
+                                  cellColours=cell_colors, 
+                                  bbox=bbox, 
                         loc='center', cellLoc='center') 
             the_table.auto_set_font_size(False)
             the_table.set_fontsize(10)
+
+            plt.title(f'Cluster ID: {clusterid}')
+            plt.legend()
+            plt.show()
 
         plt.show()
