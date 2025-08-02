@@ -14,6 +14,7 @@ import astropy.units as u
 from helpers.regions import WriteReg
 
 import itertools
+import re
 
 chandra_jwst_dir = "/Users/undergradstudent/Research/XRB-Analysis/Galaxies/M66/Chandra-JWST/"
 input_model = '/Users/undergradstudent/Research/XRB-Analysis/jwst-models/isochrone-query-step-0_009.dat'
@@ -265,7 +266,7 @@ def find_parent_cluster(
         cluster_age_err_head='Cluster Age Err (Myr)', 
         star_age_head='Star Age (Myr)', 
         dist='Cluster Separation (pc)',
-        fit_type='wls'
+        fit_type='wls',
     ):
     '''The weighted least squares implementation to find the parent cluster
     for each X-ray source.
@@ -345,7 +346,11 @@ def FitCCD(
 def remove_duplicates(filters):
     '''Remove the same filter combinations (eg. ['F275W', 'F275W']) and return usable colors
     (eg. [smaller filter, bigger filter])'''
-    non_duplicates = [filt for filt in filters if filt[0] != filt[1] and filt[0] < filt[1]]
+    non_duplicates = [filt for filt in filters \
+                      if filt[0] != filt[1] and # Two filters are not duplicates
+                      float(''.join(re.findall(r'\d+', filt[0]))) # Wavelength of first filter is \
+                      < float(''.join(re.findall(r'\d+', filt[1])))] # smaller than the second filter
+    
     return non_duplicates
 
 def PlotCCD(
@@ -418,7 +423,7 @@ def PlotCCD(
             plt.scatter(xage, yage, marker="*", color=model_color, s=75, zorder=5)
             plt.annotate("400 Myrs", (xage, yage), zorder=900)
 
-        modelchis_all = TempModel['Test Statistic'].values.tolist()
+        modelchis_all = TempModel['FitCCD Test Statistic'].values.tolist()
         chisort = sorted(enumerate(modelchis_all), key=lambda i: i[1]) # Sorting the fit parameters
         modelparams_all = [[round(TempModel[p][m[0]],8) for p in modelparams] for m in chisort]
                                      
