@@ -19,6 +19,9 @@ import re
 chandra_jwst_dir = "/Users/undergradstudent/Research/XRB-Analysis/Galaxies/M66/Chandra-JWST/"
 input_model = '/Users/undergradstudent/Research/XRB-Analysis/jwst-models/isochrone-query-step-0_009.dat'
 
+CB07_acs = "/Users/undergradstudent/Research/XRB-Analysis/code/XRBID/XRBID/CB07_models_acs_wfc.csv"
+CB07_wfc3 = "/Users/undergradstudent/Research/XRB-Analysis/code/XRBID/XRBID/CB07_models_wfc3_uvis.csv"
+
 # Default column names for creating the absorption dataframe
 cols = [
         'logAge',
@@ -290,8 +293,9 @@ def find_parent_cluster(
 
 def FitCCD(
         df, 
-        models,
         idheader,
+        instrument=False,
+        input_model=False,
         min_models=5, 
         min_measures=2,
         plotCCD=False,
@@ -304,7 +308,10 @@ def FitCCD(
     NOTE: Make sure that if you are using the filter F275W, rename it to F225W
     '''
     df = df.copy()
-    isoTemp = models.copy()
+    if isinstance(input_model, pd.DataFrame): isoTemp = input_model.copy()
+    elif instrument:
+        if instrument.lower() == 'acs': isoTemp = pd.read_csv(CB07_acs)
+        elif instrument.lower() == 'wfc3': isoTemp = pd.read_csv(CB07_wfc3)
 
     filters = [filt for filt in df.columns.tolist() if filt[0]=="F" and filt[-1]=="W"]
     filter_list = list(itertools.product(filters, filters))
@@ -325,7 +332,7 @@ def FitCCD(
 
     for filt in v_filters:
         isoTemp[f'{filt[0][2:]} - {filt[1][2:]}'] = isoTemp[filt[1]] - isoTemp[filt[0]]
-    
+
     # Prepare data for WLS
     sourcemags = [[df[f][i] for f in photheads] for i in range(len(df))]
     sourcemag_errs = [[df[e][i] for e in errorheads] for i in range(len(df))]
@@ -336,11 +343,13 @@ def FitCCD(
                      sourcemag_errs, idheader, sourceids, 
                      min_models, min_measures)
     
+    isoMatches['Age (Myr)'] = 10 ** isoMatches['log-age-yr'] * u.yr.to(u.Myr)
+
     if plotCCD:
         PlotCCD(df=df, bestfit=isoMatches, models=isoTemp, xcolor=xcolor,
                 ycolor=ycolor, idheader=idheader, fitheader='Test Statistic',
                 showtable=True,)
-        
+
     return df, isoMatches
 
 def remove_duplicates(filters):
@@ -369,31 +378,31 @@ def PlotCCD(
     '''Convenience function to plot a CMD along with the data and bestfit measurements.
     If `show_table = True`, also displays a table with the best fit models'''
     df = df.copy()
-    models = models.copy()
+    models = Find(models.copy(), ['Z = 0.02', 'Library = BaSeL'])
     bestfit = bestfit.copy()
 
-    bestfit['Age (Myr)'] = 10 ** bestfit['log-age-yr'] * u.yr.to(u.Myr)
     # Plot the table
     modelparams = ['log-age-yr', 'Age (Myr)', fitheader]
-    
+
     for clusterid in df[idheader].values.tolist():
         # Plot the isochones 
+
         x = models[f'V-{xcolor[1]}'] - models[f'V-{xcolor[0]}']
         y = models[f'V-{ycolor[1]}'] - models[f'V-{ycolor[0]}']
-        plt.plot(x, y, c='k')
+        plt.plot(x, y, c='k', label='Best Fit')
 
         # Plot the data measurements
         data = Find(df, f'{idheader} == {clusterid}')
         xx = data[f'{xcolor[0]} - {xcolor[1]}']
         yy = data[f'{ycolor[0]} - {ycolor[1]}']
-        plt.scatter(xx, yy, c='b')
+        plt.scatter(xx, yy, c='b', label='Observed')
 
         # Plot the best fit measurement for comparison
         TempModel = bestfit.query(f'`{idheader}` == {clusterid}').reset_index(drop=True)
         xxx = TempModel[f'V-{xcolor[1]}'] - TempModel[f'V-{xcolor[0]}']
         yyy = TempModel[f'V-{ycolor[1]}'] - TempModel[f'V-{ycolor[0]}']
-        plt.scatter(xxx, yyy, c='red', alpha=0.5, marker='x', lw=1, edgecolors='black')
-        
+        plt.scatter(xxx, yyy, c='red', alpha=0.5, marker='x', lw=1, edgecolors='black', label='Model')
+
         # plt.xlim(-3, 3)
         # plt.ylim(3, -3)
         plt.gca().invert_yaxis()
@@ -423,7 +432,7 @@ def PlotCCD(
             plt.scatter(xage, yage, marker="*", color=model_color, s=75, zorder=5)
             plt.annotate("400 Myrs", (xage, yage), zorder=900)
 
-        modelchis_all = TempModel['FitCCD Test Statistic'].values.tolist()
+        modelchis_all = TempModel['Test Statistic'].values.tolist()
         chisort = sorted(enumerate(modelchis_all), key=lambda i: i[1]) # Sorting the fit parameters
         modelparams_all = [[round(TempModel[p][m[0]],8) for p in modelparams] for m in chisort]
                                      
@@ -441,6 +450,5 @@ def PlotCCD(
 
             plt.title(f'Cluster ID: {clusterid}')
             plt.legend()
-            plt.show()
 
         plt.show()
